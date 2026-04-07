@@ -1,3 +1,7 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { gsap, Power2 } from 'gsap';
+
 //COLORS
 var Colors = {
     red:0xf25346,
@@ -81,6 +85,7 @@ function resetGame(){
           distanceForEnnemiesSpawn:50,
 
           status : "playing",
+          pov: "3pov",
          };
   fieldLevel.innerHTML = Math.floor(game.level);
 }
@@ -88,7 +93,7 @@ function resetGame(){
 //THREEJS RELATED VARIABLES
 
 var scene,
-    camera, fieldOfView, aspectRatio, nearPlane, farPlane,
+    camera, pipCamera, fieldOfView, aspectRatio, nearPlane, farPlane,
     renderer,
     container,
     controls;
@@ -106,16 +111,14 @@ function createScene() {
   WIDTH = window.innerWidth;
 
   scene = new THREE.Scene();
+  var axesHelper = new THREE.AxesHelper(100);
+  scene.add(axesHelper);
   aspectRatio = WIDTH / HEIGHT;
   fieldOfView = 50;
   nearPlane = .1;
   farPlane = 10000;
-  camera = new THREE.PerspectiveCamera(
-    fieldOfView,
-    aspectRatio,
-    nearPlane,
-    farPlane
-    );
+  camera = new THREE.PerspectiveCamera(fieldOfView, aspectRatio, nearPlane, farPlane);
+  pipCamera = new THREE.PerspectiveCamera(fieldOfView, aspectRatio, nearPlane, farPlane);
   scene.fog = new THREE.Fog(0xf7d9aa, 100,950);
   camera.position.x = 0;
   camera.position.z = 200;
@@ -132,14 +135,9 @@ function createScene() {
 
   window.addEventListener('resize', handleWindowResize, false);
 
-  /*
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.minPolarAngle = -Math.PI / 2;
-  controls.maxPolarAngle = Math.PI ;
-
-  //controls.noZoom = true;
-  //controls.noPan = true;
-  //*/
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enabled = false;
+  controls.target.set(0, 100, 0); // target airplane default height
 }
 
 // MOUSE AND SCREEN EVENTS
@@ -150,6 +148,10 @@ function handleWindowResize() {
   renderer.setSize(WIDTH, HEIGHT);
   camera.aspect = WIDTH / HEIGHT;
   camera.updateProjectionMatrix();
+  if (pipCamera) {
+    pipCamera.aspect = WIDTH / HEIGHT;
+    pipCamera.updateProjectionMatrix();
+  }
 }
 
 function handleMouseMove(event) {
@@ -218,7 +220,7 @@ var Pilot = function(){
   this.angleHairs=0;
 
   var bodyGeom = new THREE.BoxGeometry(15,15,15);
-  var bodyMat = new THREE.MeshPhongMaterial({color:Colors.brown, shading:THREE.FlatShading});
+  var bodyMat = new THREE.MeshPhongMaterial({color:Colors.brown, flatShading:true});
   var body = new THREE.Mesh(bodyGeom, bodyMat);
   body.position.set(2,-12,0);
 
@@ -232,7 +234,7 @@ var Pilot = function(){
   var hairGeom = new THREE.BoxGeometry(4,4,4);
   var hairMat = new THREE.MeshLambertMaterial({color:Colors.brown});
   var hair = new THREE.Mesh(hairGeom, hairMat);
-  hair.geometry.applyMatrix(new THREE.Matrix4().makeTranslation(0,2,0));
+  hair.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(0,2,0));
   var hairs = new THREE.Object3D();
 
   this.hairsTop = new THREE.Object3D();
@@ -244,13 +246,13 @@ var Pilot = function(){
     var startPosZ = -4;
     var startPosX = -4;
     h.position.set(startPosX + row*4, 0, startPosZ + col*4);
-    h.geometry.applyMatrix(new THREE.Matrix4().makeScale(1,1,1));
+    h.geometry.applyMatrix4(new THREE.Matrix4().makeScale(1,1,1));
     this.hairsTop.add(h);
   }
   hairs.add(this.hairsTop);
 
   var hairSideGeom = new THREE.BoxGeometry(12,4,2);
-  hairSideGeom.applyMatrix(new THREE.Matrix4().makeTranslation(-6,0,0));
+  hairSideGeom.applyMatrix4(new THREE.Matrix4().makeTranslation(-6,0,0));
   var hairSideR = new THREE.Mesh(hairSideGeom, hairMat);
   var hairSideL = hairSideR.clone();
   hairSideR.position.set(8,-2,6);
@@ -305,149 +307,62 @@ var AirPlane = function(){
   this.mesh = new THREE.Object3D();
   this.mesh.name = "airPlane";
 
-  // Cabin
+  // 사용자의 이미지를 3D 입체로 만들기 위한 텍스처 로드
+  var textureLoader = new THREE.TextureLoader();
+  var texture = textureLoader.load('img/youngseo.png');
 
-  var geomCabin = new THREE.BoxGeometry(80,50,50,1,1,1);
-  var matCabin = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
+  // 재질 설정 (투명도 지원 및 알파테스트로 픽셀을 자름)
+  var mat = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.5, // 투명한 배경을 완전히 잘라냅니다.
+    side: THREE.FrontSide // 앞뒷면 렌더링 중복 방지
+  });
 
-  geomCabin.vertices[4].y-=10;
-  geomCabin.vertices[4].z+=20;
-  geomCabin.vertices[5].y-=10;
-  geomCabin.vertices[5].z-=20;
-  geomCabin.vertices[6].y+=30;
-  geomCabin.vertices[6].z+=20;
-  geomCabin.vertices[7].y+=30;
-  geomCabin.vertices[7].z-=20;
+  var matBack = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.5,
+    side: THREE.BackSide
+  });
 
-  var cabin = new THREE.Mesh(geomCabin, matCabin);
-  cabin.castShadow = true;
-  cabin.receiveShadow = true;
-  this.mesh.add(cabin);
+  var geom = new THREE.PlaneGeometry(350, 350); 
+  
+  // 2D 이미지를 3D처럼 보이게 하는 기법 (Volumetric Sprite)
+  // 동일한 평면을 Z축으로 미세하게 여러 장 겹쳐서 입체(두께)를 만듭니다.
+  var depth = 20; // 두께 조절 (20장)
+  for(var i=0; i<depth; i++) {
+     var layer = new THREE.Mesh(geom, mat);
+     layer.position.z = i * 2 - (depth); // 2단위 간격으로 배치
+     this.mesh.add(layer);
+     
+     // 마지막 뒷면은 BackSide 재질로 덮어 뒤에서도 보이게 함
+     if(i === 0) {
+         var backLayer = new THREE.Mesh(geom, matBack);
+         backLayer.position.z = i * 2 - (depth) - 1;
+         this.mesh.add(backLayer);
+     }
+  }
 
-  // Engine
+  // 게임 시점(우측 방향 비행)에 맞게 축 회전
+  // X축으로 날아가기 때문에 이미지가 바라보는 방향을 정렬합니다.
+  this.mesh.rotation.x = Math.PI / 2; // 평면 뷰트 수정 (상황에 따라 주석처리 가능)
+  // 기존 Orbit 적용 시 화면에 수직으로 보이려면 로테이션을 초기 상태로 두는 것이 좋습니다.
+  this.mesh.rotation.set(0, 0, 0);
 
-  var geomEngine = new THREE.BoxGeometry(20,50,50,1,1,1);
-  var matEngine = new THREE.MeshPhongMaterial({color:Colors.white, shading:THREE.FlatShading});
-  var engine = new THREE.Mesh(geomEngine, matEngine);
-  engine.position.x = 50;
-  engine.castShadow = true;
-  engine.receiveShadow = true;
-  this.mesh.add(engine);
-
-  // Tail Plane
-
-  var geomTailPlane = new THREE.BoxGeometry(15,20,5,1,1,1);
-  var matTailPlane = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-  var tailPlane = new THREE.Mesh(geomTailPlane, matTailPlane);
-  tailPlane.position.set(-40,20,0);
-  tailPlane.castShadow = true;
-  tailPlane.receiveShadow = true;
-  this.mesh.add(tailPlane);
-
-  // Wings
-
-  var geomSideWing = new THREE.BoxGeometry(30,5,120,1,1,1);
-  var matSideWing = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-  var sideWing = new THREE.Mesh(geomSideWing, matSideWing);
-  sideWing.position.set(0,15,0);
-  sideWing.castShadow = true;
-  sideWing.receiveShadow = true;
-  this.mesh.add(sideWing);
-
-  var geomWindshield = new THREE.BoxGeometry(3,15,20,1,1,1);
-  var matWindshield = new THREE.MeshPhongMaterial({color:Colors.white,transparent:true, opacity:.3, shading:THREE.FlatShading});;
-  var windshield = new THREE.Mesh(geomWindshield, matWindshield);
-  windshield.position.set(5,27,0);
-
-  windshield.castShadow = true;
-  windshield.receiveShadow = true;
-
-  this.mesh.add(windshield);
-
-  var geomPropeller = new THREE.BoxGeometry(20,10,10,1,1,1);
-  geomPropeller.vertices[4].y-=5;
-  geomPropeller.vertices[4].z+=5;
-  geomPropeller.vertices[5].y-=5;
-  geomPropeller.vertices[5].z-=5;
-  geomPropeller.vertices[6].y+=5;
-  geomPropeller.vertices[6].z+=5;
-  geomPropeller.vertices[7].y+=5;
-  geomPropeller.vertices[7].z-=5;
-  var matPropeller = new THREE.MeshPhongMaterial({color:Colors.brown, shading:THREE.FlatShading});
-  this.propeller = new THREE.Mesh(geomPropeller, matPropeller);
-
-  this.propeller.castShadow = true;
-  this.propeller.receiveShadow = true;
-
-  var geomBlade = new THREE.BoxGeometry(1,80,10,1,1,1);
-  var matBlade = new THREE.MeshPhongMaterial({color:Colors.brownDark, shading:THREE.FlatShading});
-  var blade1 = new THREE.Mesh(geomBlade, matBlade);
-  blade1.position.set(8,0,0);
-
-  blade1.castShadow = true;
-  blade1.receiveShadow = true;
-
-  var blade2 = blade1.clone();
-  blade2.rotation.x = Math.PI/2;
-
-  blade2.castShadow = true;
-  blade2.receiveShadow = true;
-
-  this.propeller.add(blade1);
-  this.propeller.add(blade2);
-  this.propeller.position.set(60,0,0);
+  // 더미 객체 (기존 충돌 및 렌더링 에러 방지용)
+  this.propeller = new THREE.Object3D(); 
   this.mesh.add(this.propeller);
-
-  var wheelProtecGeom = new THREE.BoxGeometry(30,15,10,1,1,1);
-  var wheelProtecMat = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-  var wheelProtecR = new THREE.Mesh(wheelProtecGeom,wheelProtecMat);
-  wheelProtecR.position.set(25,-20,25);
-  this.mesh.add(wheelProtecR);
-
-  var wheelTireGeom = new THREE.BoxGeometry(24,24,4);
-  var wheelTireMat = new THREE.MeshPhongMaterial({color:Colors.brownDark, shading:THREE.FlatShading});
-  var wheelTireR = new THREE.Mesh(wheelTireGeom,wheelTireMat);
-  wheelTireR.position.set(25,-28,25);
-
-  var wheelAxisGeom = new THREE.BoxGeometry(10,10,6);
-  var wheelAxisMat = new THREE.MeshPhongMaterial({color:Colors.brown, shading:THREE.FlatShading});
-  var wheelAxis = new THREE.Mesh(wheelAxisGeom,wheelAxisMat);
-  wheelTireR.add(wheelAxis);
-
-  this.mesh.add(wheelTireR);
-
-  var wheelProtecL = wheelProtecR.clone();
-  wheelProtecL.position.z = -wheelProtecR.position.z ;
-  this.mesh.add(wheelProtecL);
-
-  var wheelTireL = wheelTireR.clone();
-  wheelTireL.position.z = -wheelTireR.position.z;
-  this.mesh.add(wheelTireL);
-
-  var wheelTireB = wheelTireR.clone();
-  wheelTireB.scale.set(.5,.5,.5);
-  wheelTireB.position.set(-35,-5,0);
-  this.mesh.add(wheelTireB);
-
-  var suspensionGeom = new THREE.BoxGeometry(4,20,4);
-  suspensionGeom.applyMatrix(new THREE.Matrix4().makeTranslation(0,10,0))
-  var suspensionMat = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-  var suspension = new THREE.Mesh(suspensionGeom,suspensionMat);
-  suspension.position.set(-35,-5,0);
-  suspension.rotation.z = -.3;
-  this.mesh.add(suspension);
-
-  this.pilot = new Pilot();
-  this.pilot.mesh.position.set(-10,27,0);
-  this.mesh.add(this.pilot.mesh);
-
-
-  this.mesh.castShadow = true;
-  this.mesh.receiveShadow = true;
-
+  
+  this.pilot = {
+      updateHairs: function(){}
+  };
 };
 
-Sky = function(){
+
+
+
+var Sky = function(){
   this.mesh = new THREE.Object3D();
   this.nClouds = 20;
   this.clouds = [];
@@ -476,30 +391,38 @@ Sky.prototype.moveClouds = function(){
 
 }
 
-Sea = function(){
+var Sea = function(){
   var geom = new THREE.CylinderGeometry(game.seaRadius,game.seaRadius,game.seaLength,40,10);
-  geom.applyMatrix(new THREE.Matrix4().makeRotationX(-Math.PI/2));
-  geom.mergeVertices();
-  var l = geom.vertices.length;
+  geom.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI/2));
+  var pos = geom.attributes.position;
+  var l = pos.count;
 
   this.waves = [];
+  var waveLookup = {}; // UV Seam splitting fix
 
   for (var i=0;i<l;i++){
-    var v = geom.vertices[i];
-    //v.y = Math.random()*30;
-    this.waves.push({y:v.y,
-                     x:v.x,
-                     z:v.z,
-                     ang:Math.random()*Math.PI*2,
-                     amp:game.wavesMinAmp + Math.random()*(game.wavesMaxAmp-game.wavesMinAmp),
-                     speed:game.wavesMinSpeed + Math.random()*(game.wavesMaxSpeed - game.wavesMinSpeed)
-                    });
-  };
+    let x = pos.getX(i);
+    let y = pos.getY(i);
+    let z = pos.getZ(i);
+    let key = Math.round(x*10) + '_' + Math.round(y*10) + '_' + Math.round(z*10);
+
+    if(!waveLookup[key]) {
+      waveLookup[key] = {
+         y: y,
+         x: x,
+         z: z,
+         ang: Math.random()*Math.PI*2,
+         amp: game.wavesMinAmp + Math.random()*(game.wavesMaxAmp-game.wavesMinAmp),
+         speed: game.wavesMinSpeed + Math.random()*(game.wavesMaxSpeed - game.wavesMinSpeed)
+      };
+    }
+    this.waves.push(waveLookup[key]);
+  }
   var mat = new THREE.MeshPhongMaterial({
     color:Colors.blue,
     transparent:true,
     opacity:.8,
-    shading:THREE.FlatShading,
+    flatShading:true,
 
   });
 
@@ -510,22 +433,20 @@ Sea = function(){
 }
 
 Sea.prototype.moveWaves = function (){
-  var verts = this.mesh.geometry.vertices;
-  var l = verts.length;
-  for (var i=0; i<l; i++){
-    var v = verts[i];
+  var pos = this.mesh.geometry.attributes.position;
+  for (var i=0; i<pos.count; i++){
     var vprops = this.waves[i];
-    v.x =  vprops.x + Math.cos(vprops.ang)*vprops.amp;
-    v.y = vprops.y + Math.sin(vprops.ang)*vprops.amp;
+    pos.setX(i, vprops.x + Math.cos(vprops.ang)*vprops.amp);
+    pos.setY(i, vprops.y + Math.sin(vprops.ang)*vprops.amp);
     vprops.ang += vprops.speed*deltaTime;
-    this.mesh.geometry.verticesNeedUpdate=true;
   }
+  pos.needsUpdate = true;
 }
 
-Cloud = function(){
+var Cloud = function(){
   this.mesh = new THREE.Object3D();
   this.mesh.name = "cloud";
-  var geom = new THREE.CubeGeometry(20,20,20);
+  var geom = new THREE.BoxGeometry(20,20,20);
   var mat = new THREE.MeshPhongMaterial({
     color:Colors.white,
 
@@ -559,13 +480,13 @@ Cloud.prototype.rotate = function(){
   }
 }
 
-Ennemy = function(){
+var Ennemy = function(){
   var geom = new THREE.TetrahedronGeometry(8,2);
   var mat = new THREE.MeshPhongMaterial({
     color:Colors.red,
     shininess:0,
     specular:0xffffff,
-    shading:THREE.FlatShading
+    flatShading:true
   });
   this.mesh = new THREE.Mesh(geom,mat);
   this.mesh.castShadow = true;
@@ -573,7 +494,7 @@ Ennemy = function(){
   this.dist = 0;
 }
 
-EnnemiesHolder = function (){
+var EnnemiesHolder = function (){
   this.mesh = new THREE.Object3D();
   this.ennemiesInUse = [];
 }
@@ -633,13 +554,13 @@ EnnemiesHolder.prototype.rotateEnnemies = function(){
   }
 }
 
-Particle = function(){
+var Particle = function(){
   var geom = new THREE.TetrahedronGeometry(3,0);
   var mat = new THREE.MeshPhongMaterial({
     color:0x009999,
     shininess:0,
     specular:0xffffff,
-    shading:THREE.FlatShading
+    flatShading:true
   });
   this.mesh = new THREE.Mesh(geom,mat);
 }
@@ -653,16 +574,16 @@ Particle.prototype.explode = function(pos, color, scale){
   var targetX = pos.x + (-1 + Math.random()*2)*50;
   var targetY = pos.y + (-1 + Math.random()*2)*50;
   var speed = .6+Math.random()*.2;
-  TweenMax.to(this.mesh.rotation, speed, {x:Math.random()*12, y:Math.random()*12});
-  TweenMax.to(this.mesh.scale, speed, {x:.1, y:.1, z:.1});
-  TweenMax.to(this.mesh.position, speed, {x:targetX, y:targetY, delay:Math.random() *.1, ease:Power2.easeOut, onComplete:function(){
+  gsap.to(this.mesh.rotation, speed, {x:Math.random()*12, y:Math.random()*12});
+  gsap.to(this.mesh.scale, speed, {x:.1, y:.1, z:.1});
+  gsap.to(this.mesh.position, speed, {x:targetX, y:targetY, delay:Math.random() *.1, ease:Power2.easeOut, onComplete:function(){
       if(_p) _p.remove(_this.mesh);
       _this.mesh.scale.set(1,1,1);
       particlesPool.unshift(_this);
     }});
 }
 
-ParticlesHolder = function (){
+var ParticlesHolder = function (){
   this.mesh = new THREE.Object3D();
   this.particlesInUse = [];
 }
@@ -686,14 +607,14 @@ ParticlesHolder.prototype.spawnParticles = function(pos, density, color, scale){
   }
 }
 
-Coin = function(){
+var Coin = function(){
   var geom = new THREE.TetrahedronGeometry(5,0);
   var mat = new THREE.MeshPhongMaterial({
     color:0x009999,
     shininess:0,
     specular:0xffffff,
 
-    shading:THREE.FlatShading
+    flatShading:true
   });
   this.mesh = new THREE.Mesh(geom,mat);
   this.mesh.castShadow = true;
@@ -701,7 +622,7 @@ Coin = function(){
   this.dist = 0;
 }
 
-CoinsHolder = function (nCoins){
+var CoinsHolder = function (nCoins){
   this.mesh = new THREE.Object3D();
   this.coinsInUse = [];
   this.coinsPool = [];
@@ -764,6 +685,11 @@ CoinsHolder.prototype.rotateCoins = function(){
 // 3D Models
 var sea;
 var airplane;
+var sky;
+var coinsHolder;
+var ennemiesHolder;
+var particlesHolder;
+
 
 function createPlane(){
   airplane = new AirPlane();
@@ -880,7 +806,24 @@ function loop(){
   sky.moveClouds();
   sea.moveWaves();
 
+  // Main Screen
+  renderer.setViewport(0, 0, WIDTH, HEIGHT);
+  renderer.setScissor(0, 0, WIDTH, HEIGHT);
+  renderer.setScissorTest(true);
   renderer.render(scene, camera);
+
+  // PIP (Picture-in-Picture) Bottom Right
+  var pipWidth = WIDTH / 4;
+  var pipHeight = HEIGHT / 4;
+  var pipX = WIDTH - pipWidth - 20; // 20px padding
+  var pipY = 20;
+
+  renderer.setViewport(pipX, pipY, pipWidth, pipHeight);
+  renderer.setScissor(pipX, pipY, pipWidth, pipHeight);
+  renderer.setScissorTest(true);
+  renderer.clearDepth(); // very important
+  renderer.render(scene, pipCamera);
+
   requestAnimationFrame(loop);
 }
 
@@ -943,8 +886,43 @@ function updatePlane(){
   airplane.mesh.rotation.x = (airplane.mesh.position.y-targetY)*deltaTime*game.planeRotZSensivity;
   var targetCameraZ = normalize(game.planeSpeed, game.planeMinSpeed, game.planeMaxSpeed, game.cameraNearPos, game.cameraFarPos);
   camera.fov = normalize(mousePos.x,-1,1,40, 80);
-  camera.updateProjectionMatrix ()
-  camera.position.y += (airplane.mesh.position.y - camera.position.y)*deltaTime*game.cameraSensivity;
+  camera.updateProjectionMatrix();
+  pipCamera.fov = camera.fov;
+  pipCamera.updateProjectionMatrix();
+
+  function apply1POV(cam) {
+    cam.position.copy(airplane.mesh.position);
+    var offset = new THREE.Vector3(8, 8, 0); 
+    offset.applyEuler(airplane.mesh.rotation);
+    cam.position.add(offset);
+    
+    var lookTarget = new THREE.Vector3(100, 0, 0);
+    lookTarget.applyEuler(airplane.mesh.rotation);
+    lookTarget.add(cam.position);
+    
+    cam.up.set(0, 1, 0);
+    cam.up.applyEuler(airplane.mesh.rotation);
+    cam.lookAt(lookTarget);
+  }
+
+  function apply3POV(cam) {
+    cam.up.set(0, 1, 0);
+    cam.rotation.set(0, 0, 0); 
+    cam.position.x += (0 - cam.position.x) * deltaTime * 0.005; 
+    cam.position.z += (200 - cam.position.z) * deltaTime * 0.005;
+    cam.position.y += (airplane.mesh.position.y - cam.position.y) * deltaTime * game.cameraSensivity;
+  }
+
+  // 우측 하단 PiP는 항상 1인칭
+  apply1POV(pipCamera);
+
+  if (game.pov === '3pov') {
+    apply3POV(camera);
+  } else if (game.pov === 'orbit') {
+    // 궤도 카메라(Orbit) 시점일 때는 비행기를 대상(target)으로 지속적으로 추적하게 함
+    controls.target.set(0, airplane.mesh.position.y, 0);
+    controls.update();
+  }
 
   game.planeCollisionSpeedX += (0-game.planeCollisionSpeedX)*deltaTime * 0.03;
   game.planeCollisionDisplacementX += (0-game.planeCollisionDisplacementX)*deltaTime *0.01;
@@ -998,6 +976,13 @@ function init(event){
   document.addEventListener('touchmove', handleTouchMove, false);
   document.addEventListener('mouseup', handleMouseUp, false);
   document.addEventListener('touchend', handleTouchEnd, false);
+
+  document.addEventListener('keydown', function(event) {
+    if (event.code === 'Space') {
+      game.pov = (game.pov === 'orbit') ? '3pov' : 'orbit';
+      controls.enabled = (game.pov === 'orbit');
+    }
+  }, false);
 
   loop();
 }
